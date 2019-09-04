@@ -1,0 +1,242 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+    <link href="ol/ol.css" rel="stylesheet" />
+    <style>
+        html, body, .map {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        .ol-control-panel {
+            top: 10px;
+            right: 10px;
+        }
+        div#animation-buttons-holder {
+            position: relative;
+            bottom: 115px;
+        }
+        .selected-datet {
+            background-color: rgba(240, 248, 255, 0.95);
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-timeline-graph2d.min.css" integrity="sha256-ttXXbnaumOzkd0djY9bs4c5n86l4gmYrYo6BBUl6YPA=" crossorigin="anonymous" />
+    <script src="ol/ol.js"></script>
+    <title>OpenLayers example</title>
+    <script src='https://kit.fontawesome.com/a076d05399.js'></script>
+    <script src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"></script>
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.js" integrity="sha256-ff7iz7mLH5QJA9IUC44b+sqjMi7c2aTR9YO2DSzAGZo=" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div id="map" class="map">
+    </div>
+    <!--<div role="group" aria-label="Animation controls">
+        <button id="play" type="button" onclick="play()">Play</button>
+        <button id="pause" type="button" onclick="stop()">Pause</button>
+        <span id="info"></span>
+    </div>-->
+    <script type="text/javascript">
+
+        var startDate; 
+        var fullAnimationRange;
+        var currentFrame;
+        var frameRate = 0.5; // frames per second
+        var animationId = null;
+        var currentSelected;
+        var map;
+
+        function initializeMap() {
+            map = new ol.Map({
+                target: 'map',
+                layers: [
+                    new ol.layer.Tile({
+                        source: new ol.source.XYZ({
+                            attributions: 'Tiles © <a href="https://services.arcgisonline.com/ArcGIS/' +
+                            'rest/services/World_Topo_Map/MapServer">ArcGIS</a>',
+                            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/' +
+                            'World_Topo_Map/MapServer/tile/{z}/{y}/{x}'
+                        })
+                    })
+                ],
+                view: new ol.View({
+                    center: ol.proj.fromLonLat([37.41, 8.82]),
+                    zoom: 4
+                })
+            });
+        }
+        
+
+        function addAnimationButtons() {
+
+            var container = document.createElement('div');
+            container.id = "animation-buttons-holder";
+
+            $("<div/>").html('<div role="group" aria-label="Animation controls"> <button id="play" type="button" onclick="play()">Play</button> <button id="pause" type="button" onclick="stop()">Pause</button> <span id="info"></span></div>').appendTo(container)
+
+            var controlPanel = new ol.control.Control({
+                id: "animation-buttons",
+                element: container
+            });
+            map.addControl(controlPanel);
+            
+        }
+        
+        function startDateFromCapabilities() {
+            $.ajax({
+                type: "GET",
+                url: "https://tethyswa.servirglobal.net/thredds/wms/tethys/WALIS/combined_retrospective_198101.nc?service=WMS&version=1.3.0&request=GetCapabilities",
+                dataType: "xml",
+                success: function (xml) {
+                    $(xml).find('Layer').each(function () {
+                        if ($(this).children("Dimension").attr("name") == "time") {
+                            startDate = $(this).children("Dimension").attr("default");
+                            fullAnimationRange = $(this).children("Dimension").text().trim().split(",");
+                            return false;
+                        }
+                    });
+                    var theRetroLayer = new ol.layer.Tile({
+                        source: new ol.source.TileWMS({
+                            attributions: ['SERVIR Global'],
+                            url: 'https://tethyswa.servirglobal.net/thredds/wms/tethys/WALIS/combined_retrospective_198101.nc?srs=EPSG:3857&transparent=true&format=image/png&exceptions=application/vnd.ogc.se_xml&styles=&tiled=true&colorscalerange=0,10&service=WMS&version=1.1.1&request=GetMap&layers=WaterTableD',
+                            params: { 'time': startDate }
+                        }),
+                        id:"retro"
+                    });
+                    currentFrame = fullAnimationRange.indexOf(startDate);
+                    map.addLayer(theRetroLayer);
+                    createTimeline();
+                    setTimelineSelectedDate();
+                }
+            });
+        }
+
+        
+        function createTimeline() {
+            var container = document.createElement('div');// document.getElementById('visualization');
+            container.style.cssText = "position: absolute; bottom: 0; width: 100%; background-color: #f0f8ffa6;";
+           
+            var items = {}
+
+            // Configuration for the Timeline
+            var enddate = new Date(fullAnimationRange[fullAnimationRange.length - 1]);
+            enddate.setDate(enddate.getDate() + 1);
+            var options = {
+                start: new Date(fullAnimationRange[0]),
+                end: enddate,
+                zoomable: true
+            };
+
+            // Create a Timeline
+            var timeline = new vis.Timeline(container, items, options);
+            timeline.on('click', function (properties) {
+
+                stop();
+                //set start startDate
+                var holdtime = properties.snappedTime.toISOString();
+
+                startDate = holdtime.split("T")[0] + "T00:00:00.000Z";
+                currentFrame = fullAnimationRange.indexOf(startDate);
+                map.getLayers().forEach(
+                    function (lyr) {
+                        if ("retro" === lyr.get('id')) {
+                            startDate = fullAnimationRange[currentFrame];
+                            lyr.setSource(new ol.source.TileWMS({
+                                attributions: ['SERVIR Global'],
+                                url: 'https://tethyswa.servirglobal.net/thredds/wms/tethys/WALIS/combined_retrospective_198101.nc?srs=EPSG:3857&transparent=true&format=image/png&exceptions=application/vnd.ogc.se_xml&styles=&tiled=true&colorscalerange=0,10&service=WMS&version=1.1.1&request=GetMap&layers=WaterTableD',
+                                params: { 'time': startDate }
+                            }));
+                        }
+                    });
+            });
+            var controlPanel = new ol.control.Control({
+                id: "timeline",
+                element: container
+            });
+            map.addControl(controlPanel);
+            setTimelineSelectedDate();
+        }
+
+        $(function () {
+            initializeMap();
+            addAnimationButtons();
+            startDateFromCapabilities();
+            setInitialDate();
+        });
+
+        function setInitialDate() {
+            if ($(".selected-date").length == 0) {
+                setTimelineSelectedDate();
+                window.setTimeout(setInitialDate, 250);
+            }
+        }
+
+        function stop() {
+            if (animationId !== null) {
+                window.clearInterval(animationId);
+                animationId = null;
+            }
+        };
+
+        function play() {
+            console.log("in play");
+            stop();
+            animationId = window.setInterval(nextStep, 1000 / frameRate);
+        };
+
+        function nextStep() {
+            console.log("in nextStep");
+            currentFrame = currentFrame < fullAnimationRange.length - 2 ? currentFrame + 1 : 0;
+            map.getLayers().forEach(
+                function (lyr) {
+                    if ("retro" === lyr.get('id')) {
+                        startDate = fullAnimationRange[currentFrame];
+
+                        setTimelineSelectedDate();
+
+                        lyr.setSource(new ol.source.TileWMS({
+                            attributions: ['SERVIR Global'],
+                            url: 'https://tethyswa.servirglobal.net/thredds/wms/tethys/WALIS/combined_retrospective_198101.nc?srs=EPSG:3857&transparent=true&format=image/png&exceptions=application/vnd.ogc.se_xml&styles=&tiled=true&colorscalerange=0,10&service=WMS&version=1.1.1&request=GetMap&layers=WaterTableD',
+                            params: { 'time': startDate }
+                        }));
+                    }
+                });
+        }
+
+
+        function setTimelineSelectedDate() {
+            if (startDate) {
+                if (currentSelected) {
+                    currentSelected.removeClass("selected-datet");
+                }
+                var datePart = startDate.split("T")[0];
+                parts = datePart.split("-");
+                day = trimLeadingZero(parts[2]);
+                currentSelected = $(".vis-grid.vis-day" + day + ".vis-" + getMonth(parts[1]));
+                currentSelected.addClass("selected-datet");
+            }
+        }
+
+        function getMonth(index) {
+            mlist = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+            return mlist[index - 1];
+        }
+
+        function trimLeadingZero(num) {
+            if (num.indexOf("0") == 0) {
+                num = num.replace("0", "");
+            }
+            return num;
+        }
+
+    </script>
+</body>
+</html>
